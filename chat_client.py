@@ -2,7 +2,8 @@ import socket
 import sys
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QTextEdit, QLineEdit,
-    QPushButton, QLabel, QMessageBox, QHBoxLayout, QInputDialog
+    QPushButton, QLabel, QMessageBox, QHBoxLayout, QInputDialog,
+    QComboBox, QListWidget
 )
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QFont
@@ -44,62 +45,203 @@ class ReceiveThread(QThread):
 class Client(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Chatroom")
-        self.setStyleSheet("background-color: #FDDBE6;")
+        # MODIFICAÇÃO: Título da janela e dimensões iniciais ajustados
+        self.setWindowTitle("PyChat Multi-Temas Client")
+        self.resize(900, 600)
+        # MODIFICAÇÃO: Aplicação de folha de estilos (QSS) Dark Theme
+        self._apply_styles()
+
         self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.receive_thread = None
         self.nickname = None
         self._setup_ui()
 
-    def _setup_ui(self):
-        self.layout = QVBoxLayout()
+    # MODIFICAÇÃO: Método exclusivo para personalização estética dos componentes
+    def _apply_styles(self):
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #12131b;
+                color: #e1e1e6;
+                font-family: 'Segoe UI', Arial, sans-serif;
+            }
+            QLineEdit {
+                background-color: #1e1f2c;
+                border: 1px solid #2a2c3d;
+                border-radius: 16px;
+                padding: 8px 15px;
+                color: #ffffff;
+            }
+            QLineEdit:focus {
+                border: 1px solid #5865f2;
+            }
+            QTextEdit {
+                background-color: #191a24;
+                border: 1px solid #27293a;
+                border-radius: 12px;
+                color: #ffffff;
+                padding: 10px;
+                font-size: 13px;
+            }
+            QListWidget {
+                background-color: #191a24;
+                border: 1px solid #27293a;
+                border-radius: 12px;
+                color: #2ecc71;
+                font-weight: bold;
+                padding: 10px;
+            }
+            QPushButton {
+                font-weight: bold;
+                border-radius: 18px;
+                padding: 8px 16px;
+            }
+            QPushButton#btnSend {
+                background-color: #5865f2;
+                color: white;
+                border: none;
+                border-radius: 20px;
+                padding: 10px 22px;
+            }
+            QPushButton#btnSend:hover {
+                background-color: #4752c4;
+            }
+            QPushButton#btnRecord {
+                background-color: #f35543;
+                color: white;
+                border: none;
+                border-radius: 20px;
+                padding: 10px 22px;
+            }
+            QPushButton#btnRecord:hover {
+                background-color: #d94332;
+            }
+            QPushButton#btnFile {
+                background-color: #262838;
+                color: white;
+                border: 1px solid #363950;
+                border-radius: 20px;
+                padding: 10px 22px;
+            }
+            QPushButton#btnFile:hover {
+                background-color: #313448;
+            }
+            QPushButton#btnConnect {
+                background-color: #2ecc71;
+                color: white;
+                border-radius: 8px;
+                padding: 4px 10px;
+            }
+            QComboBox {
+                background-color: #1e1f2c;
+                border: 1px solid #2d3045;
+                border-radius: 6px;
+                padding: 4px 8px;
+                color: white;
+            }
+        """)
 
-        form_layout = QHBoxLayout()
+    def _setup_ui(self):
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setSpacing(10)
+
+        # --- BARRA SUPERIOR (HEADER) ---
+        header_layout = QHBoxLayout()
+
+        # MODIFICAÇÃO: Tradução dos Placeholders e textos do cabeçalho
         self.nick_input = QLineEdit()
         self.nick_input.setPlaceholderText("Nickname")
         self.pass_input = QLineEdit()
-        self.pass_input.setPlaceholderText("Password (admin only)")
+        self.pass_input.setPlaceholderText("Senha (apenas admin)")
         self.pass_input.setEchoMode(QLineEdit.Password)
-        self.connect_button = QPushButton("Connect")
+        self.connect_button = QPushButton("Conectar")
+        self.connect_button.setObjectName("btnConnect")
         self.connect_button.clicked.connect(self.start_connection)
-        form_layout.addWidget(self.nick_input)
-        form_layout.addWidget(self.pass_input)
-        form_layout.addWidget(self.connect_button)
+
+        status_label = QLabel("Status:")
+        self.status_combo = QComboBox()
+        self.status_combo.addItems(["Online", "Ausente", "Ocupado"])
+
+        btn_options = QPushButton("Opções")
+        btn_options.setFlat(True)
+        btn_folder = QPushButton("Pasta")
+        btn_folder.setFlat(True)
+
+        header_layout.addWidget(QLabel("Usuário:"))
+        header_layout.addWidget(self.nick_input)
+        header_layout.addWidget(self.pass_input)
+        header_layout.addWidget(self.connect_button)
+        header_layout.addWidget(status_label)
+        header_layout.addWidget(self.status_combo)
+        header_layout.addStretch()
+        header_layout.addWidget(btn_options)
+        header_layout.addWidget(btn_folder)
+
+        # --- CORPO PRINCIPAL (CHAT + LISTA ONLINE) ---
+        body_layout = QHBoxLayout()
 
         self.chat_display = QTextEdit()
         self.chat_display.setReadOnly(True)
-        self.chat_display.setFont(QFont("Arial", 12))
-        self.chat_display.setStyleSheet("background-color: white; color: black;")
 
+        # MODIFICAÇÃO: Painel lateral para exibição dos usuários conectados em tempo real
+        users_panel = QVBoxLayout()
+        users_title = QLabel("ONLINE")
+        users_title.setStyleSheet("font-weight: bold; color: #8e9297; font-size: 11px;")
+        self.users_list = QListWidget()
+
+        users_container = QWidget()
+        users_container.setLayout(users_panel)
+        users_panel.addWidget(users_title)
+        users_panel.addWidget(self.users_list)
+        users_panel.setContentsMargins(0, 0, 0, 0)
+
+        body_layout.addWidget(self.chat_display, stretch=3)
+        body_layout.addWidget(users_container, stretch=1)
+
+        # --- BARRA INFERIOR (ENTRADA E BOTÕES) ---
         msg_input_layout = QHBoxLayout()
+
+        # MODIFICAÇÃO: Tradução dos rótulos dos botões e do campo de mensagem
         self.msg_input = QLineEdit()
-        self.msg_input.setPlaceholderText("Type your message and press Enter (or 'q' to quit)")
+        self.msg_input.setPlaceholderText("Digite sua mensagem (ou 'q' para sair)...")
         self.msg_input.returnPressed.connect(self.send_message)
-        self.msg_input.setStyleSheet("background-color: white; color: black;")
-        self.send_button = QPushButton("Send")
+
+        self.btn_record = QPushButton("Gravar")
+        self.btn_record.setObjectName("btnRecord")
+
+        self.btn_file = QPushButton("Arquivo")
+        self.btn_file.setObjectName("btnFile")
+
+        self.send_button = QPushButton("Enviar Geral")
+        self.send_button.setObjectName("btnSend")
         self.send_button.clicked.connect(self.send_message)
-        msg_input_layout.addWidget(self.msg_input)
+
+        msg_input_layout.addWidget(self.msg_input, stretch=1)
+        msg_input_layout.addWidget(self.btn_record)
+        msg_input_layout.addWidget(self.btn_file)
         msg_input_layout.addWidget(self.send_button)
 
-        self.tip_label = QLabel("Admin commands: /kick NAME, /ban NAME, /unban NAME")
-        self.tip_label.setFont(QFont("Arial", 10))
+        # MODIFICAÇÃO: Dica de comandos de admin em português
+        self.tip_label = QLabel("Comandos Admin: /kick NOME, /ban NOME, /unban NOME")
+        self.tip_label.setStyleSheet("color: #72767d; font-size: 11px;")
 
-        self.layout.addLayout(form_layout)
-        self.layout.addWidget(self.chat_display)
-        self.layout.addLayout(msg_input_layout)
-        self.layout.addWidget(self.tip_label)
-        self.setLayout(self.layout)
+        main_layout.addLayout(header_layout)
+        main_layout.addLayout(body_layout)
+        main_layout.addLayout(msg_input_layout)
+        main_layout.addWidget(self.tip_label)
+        self.setLayout(main_layout)
 
     def start_connection(self):
         nick = self.nick_input.text().strip()
         pwd = self.pass_input.text()
 
+        # MODIFICAÇÃO: Tradução das mensagens de erro na conexão
         if not nick:
-            QMessageBox.warning(self, "Error", "Nickname required")
+            QMessageBox.warning(self, "Erro", "Nickname obrigatório")
             return
 
         if nick.lower() != "admin" and pwd:
-            QMessageBox.warning(self, "Error", "Only Admin should enter a password.")
+            QMessageBox.warning(self, "Erro", "Apenas o Admin deve inserir senha.")
             return
 
         self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -113,7 +255,7 @@ class Client(QWidget):
             recv = self.client.recv(1024).decode('utf-8')
             if recv == "PASS":
                 if not pwd:
-                    QMessageBox.warning(self, "Error", "Admin password required.")
+                    QMessageBox.warning(self, "Erro", "Senha de Admin obrigatória.")
                     self.client.close()
                     return
                 while True:
@@ -121,7 +263,7 @@ class Client(QWidget):
                     resp = self.client.recv(1024).decode('utf-8')
                     if resp == "REFUSE":
                         self.client.close()
-                        pwd, ok = QInputDialog.getText(self, "Wrong Password", "Try admin password again:",
+                        pwd, ok = QInputDialog.getText(self, "Senha Incorreta", "Tente a senha de admin novamente:",
                                                        echo=QLineEdit.Password)
                         if not ok or not pwd:
                             return
@@ -134,16 +276,18 @@ class Client(QWidget):
                     break
 
             elif recv == "BAN":
-                self.chat_display.append("<i>[!] You are banned.</i>")
+                self.chat_display.append("<span style='color: #e74c3c;'><i>[!] Você está banido.</i></span>")
                 self.client.close()
                 return
 
             self.nickname = nick.capitalize()
         except Exception as e:
-            self.chat_display.append(f"<i>[!] Connection error: {e}</i>")
+            self.chat_display.append(f"<span style='color: #e74c3c;'><i>[!] Erro de conexão: {e}</i></span>")
             return
 
-        self.chat_display.append(f"<i>You have joined the chat as {self.nickname}.</i>")
+        # MODIFICAÇÃO: Tradução da mensagem de boas-vindas do sistema
+        self.chat_display.append(f"<span style='color: #f1c40f;'>[SISTEMA]: Bem-vindo ao bate-papo, {self.nickname}! Digite /ajuda para ver os comandos.</span>")
+        
         self.connect_button.setEnabled(False)
         self.nick_input.setEnabled(False)
         self.pass_input.setEnabled(False)
@@ -157,26 +301,39 @@ class Client(QWidget):
         if msg.startswith("NICK"):
             return
 
-        if "You have been kicked by the Admin!" in msg or "You are banned" in msg:
-            QMessageBox.information(self, "Disconnected", msg)
+        # MODIFICAÇÃO: Leitura do sinal USERS: para preenchimento automático da lista lateral
+        if msg.startswith("USERS:"):
+            users = msg[6:].split(',')
+            self.users_list.clear()
+            for user in users:
+                if user.strip():
+                    self.users_list.addItem(f"• {user.strip()} (Online)")
+            return
+
+        # MODIFICAÇÃO: Tratamento de expulsão ou banimento com diálogos em português
+        if "Você foi expulso pelo Administrador!" in msg or "Você está banido" in msg:
+            QMessageBox.information(self, "Desconectado", msg)
             self.close()
             return
 
+        # MODIFICAÇÃO: Formatação de mensagens do sistema e eventos traduzidos
         if (
-                msg.startswith("Command was refused")
+                msg.startswith("Comando recusado")
                 or msg.startswith("[!]")
-                or "has joined the chat" in msg
-                or "has left the chat" in msg
-                or "was kicked by Admin!" in msg
-                or "has been banned" in msg
-                or "has been unbanned" in msg
+                or "entrou no chat" in msg
+                or "saiu do chat" in msg
+                or "foi expulso pelo Administrador!" in msg
+                or "foi banido" in msg
+                or "foi desbanido" in msg
         ):
-            self.chat_display.append(f"<i>{msg}</i>")
+            self.chat_display.append(f"<span style='color: #f1c40f;'>[SISTEMA]: {msg}</span>")
         else:
-            self.chat_display.append(msg)
+            self.chat_display.append(f"<span style='color: #ffffff;'>{msg}</span>")
 
     def handle_disconnected(self):
-        self.chat_display.append("<i>[!] Disconnected from server.</i>")
+        # MODIFICAÇÃO: Tradução da notificação de desconexão e limpeza da lista online
+        self.chat_display.append("<span style='color: #e74c3c;'><i>[!] Desconectado do servidor.</i></span>")
+        self.users_list.clear()
         if self.receive_thread:
             self.receive_thread.stop()
         self.connect_button.setEnabled(True)
@@ -193,7 +350,7 @@ class Client(QWidget):
 
         if text.lower() == 'q':
             self.client.close()
-            self.chat_display.append("<i>You have left the chat.</i>")
+            self.chat_display.append("<i>Você saiu do chat.</i>")
             if self.receive_thread:
                 self.receive_thread.stop()
             self.close()
@@ -202,6 +359,7 @@ class Client(QWidget):
             self.pass_input.setEnabled(True)
             return
 
+        # MODIFICAÇÃO: Mensagens de resposta a comandos tratadas em português
         if text.startswith('/'):
             if self.nickname.lower() == "admin":
                 if text.startswith('/kick'):
@@ -211,9 +369,9 @@ class Client(QWidget):
                 elif text.startswith('/unban'):
                     self.client.send(f"UNBAN {text[7:].strip()}".encode('utf-8'))
                 else:
-                    self.chat_display.append("<i>Unknown admin command.</i>")
+                    self.chat_display.append("<span style='color: #f1c40f;'><i>[SISTEMA]: Comando de admin desconhecido.</i></span>")
             else:
-                self.chat_display.append("<i>Only Admin can use commands.</i>")
+                self.chat_display.append("<span style='color: #f1c40f;'><i>[SISTEMA]: Apenas o Admin pode usar comandos.</i></span>")
         else:
             self.client.send(f"{self.nickname}: {text}".encode('utf-8'))
 
@@ -223,6 +381,5 @@ class Client(QWidget):
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     win = Client()
-    win.resize(600, 600)
     win.show()
     sys.exit(app.exec_())
