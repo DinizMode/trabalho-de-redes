@@ -1,15 +1,51 @@
 import socket
 import sys
+import time
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QTextEdit, QLineEdit,
     QPushButton, QLabel, QMessageBox, QHBoxLayout, QInputDialog,
     QComboBox, QListWidget
 )
 from PyQt5.QtCore import QThread, pyqtSignal
-from PyQt5.QtGui import QFont
 
 HOST = '127.0.0.1'
 PORT = 10346
+
+
+class ServerMonitorThread(QThread):
+    server_down = pyqtSignal()
+
+    def __init__(self, host, port):
+        super().__init__()
+        self.host = host
+        self.port = port
+        self.running = True
+        self.was_online = False
+
+    def run(self):
+        while self.running:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1.0)
+                result = sock.connect_ex((self.host, self.port))
+                sock.close()
+
+                if result == 0:
+                    self.was_online = True
+                else:
+                    if self.was_online:
+                        self.server_down.emit()
+                        break
+            except:
+                if self.was_online:
+                    self.server_down.emit()
+                    break
+            time.sleep(1)
+
+    def stop(self):
+        self.running = False
+        self.quit()
+        self.wait()
 
 
 class ReceiveThread(QThread):
@@ -45,18 +81,32 @@ class ReceiveThread(QThread):
 class Client(QWidget):
     def __init__(self):
         super().__init__()
-        # MODIFICAÇÃO: Título da janela e dimensões iniciais ajustados
         self.setWindowTitle("PyChat Multi-Temas Client")
         self.resize(900, 600)
-        # MODIFICAÇÃO: Aplicação de folha de estilos (QSS) Dark Theme
         self._apply_styles()
 
         self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.receive_thread = None
         self.nickname = None
         self._setup_ui()
+        self._show_initial_instruction()
 
-    # MODIFICAÇÃO: Método exclusivo para personalização estética dos componentes
+        self.monitor_thread = ServerMonitorThread(HOST, PORT)
+        self.monitor_thread.server_down.connect(self.on_server_shutdown)
+        self.monitor_thread.start()
+
+    def _show_initial_instruction(self):
+        instruction = (
+            "<div style='color: #3498db; font-size: 13px; line-height: 1.6;'>"
+            "<b>[ORIENTAÇÃO DE CONEXÃO]</b><br>"
+            "Para entrar na sala de bate-papo:<br>"
+            "1. Insira seu apelido no campo <b>Nickname</b> na barra superior (canto esquerdo).<br>"
+            "2. Se for o usuário <b>Admin</b>, preencha também o campo de <b>Senha</b>.<br>"
+            "3. Clique no botão verde <b>Conectar</b> para iniciar a sessão."
+            "</div>"
+        )
+        self.chat_display.setHtml(instruction)
+
     def _apply_styles(self):
         self.setStyleSheet("""
             QWidget {
@@ -145,10 +195,8 @@ class Client(QWidget):
         main_layout.setContentsMargins(15, 15, 15, 15)
         main_layout.setSpacing(10)
 
-        # --- BARRA SUPERIOR (HEADER) ---
         header_layout = QHBoxLayout()
 
-        # MODIFICAÇÃO: Tradução dos Placeholders e textos do cabeçalho
         self.nick_input = QLineEdit()
         self.nick_input.setPlaceholderText("Nickname")
         self.pass_input = QLineEdit()
@@ -177,13 +225,11 @@ class Client(QWidget):
         header_layout.addWidget(btn_options)
         header_layout.addWidget(btn_folder)
 
-        # --- CORPO PRINCIPAL (CHAT + LISTA ONLINE) ---
         body_layout = QHBoxLayout()
 
         self.chat_display = QTextEdit()
         self.chat_display.setReadOnly(True)
 
-        # MODIFICAÇÃO: Painel lateral para exibição dos usuários conectados em tempo real
         users_panel = QVBoxLayout()
         users_title = QLabel("ONLINE")
         users_title.setStyleSheet("font-weight: bold; color: #8e9297; font-size: 11px;")
@@ -198,10 +244,8 @@ class Client(QWidget):
         body_layout.addWidget(self.chat_display, stretch=3)
         body_layout.addWidget(users_container, stretch=1)
 
-        # --- BARRA INFERIOR (ENTRADA E BOTÕES) ---
         msg_input_layout = QHBoxLayout()
 
-        # MODIFICAÇÃO: Tradução dos rótulos dos botões e do campo de mensagem
         self.msg_input = QLineEdit()
         self.msg_input.setPlaceholderText("Digite sua mensagem (ou 'q' para sair)...")
         self.msg_input.returnPressed.connect(self.send_message)
@@ -221,7 +265,6 @@ class Client(QWidget):
         msg_input_layout.addWidget(self.btn_file)
         msg_input_layout.addWidget(self.send_button)
 
-        # MODIFICAÇÃO: Dica de comandos de admin em português
         self.tip_label = QLabel("Comandos Admin: /kick NOME, /ban NOME, /unban NOME")
         self.tip_label.setStyleSheet("color: #72767d; font-size: 11px;")
 
@@ -235,7 +278,6 @@ class Client(QWidget):
         nick = self.nick_input.text().strip()
         pwd = self.pass_input.text()
 
-        # MODIFICAÇÃO: Tradução das mensagens de erro na conexão
         if not nick:
             QMessageBox.warning(self, "Erro", "Nickname obrigatório")
             return
@@ -285,9 +327,9 @@ class Client(QWidget):
             self.chat_display.append(f"<span style='color: #e74c3c;'><i>[!] Erro de conexão: {e}</i></span>")
             return
 
-        # MODIFICAÇÃO: Tradução da mensagem de boas-vindas do sistema
+        self.chat_display.clear()
         self.chat_display.append(f"<span style='color: #f1c40f;'>[SISTEMA]: Bem-vindo ao bate-papo, {self.nickname}! Digite /ajuda para ver os comandos.</span>")
-        
+
         self.connect_button.setEnabled(False)
         self.nick_input.setEnabled(False)
         self.pass_input.setEnabled(False)
@@ -297,11 +339,19 @@ class Client(QWidget):
         self.receive_thread.connection_closed.connect(self.handle_disconnected)
         self.receive_thread.start()
 
+    # MODIFICAÇÃO: Fecha a janela imediatamente sem exibir qualquer caixa de mensagem (QMessageBox)
+    def on_server_shutdown(self):
+        self.close()
+
     def handle_received(self, msg):
         if msg.startswith("NICK"):
             return
 
-        # MODIFICAÇÃO: Leitura do sinal USERS: para preenchimento automático da lista lateral
+        # MODIFICAÇÃO: Fechamento direto da janela ao receber comando SHUTDOWN do servidor
+        if msg == "SHUTDOWN":
+            self.close()
+            return
+
         if msg.startswith("USERS:"):
             users = msg[6:].split(',')
             self.users_list.clear()
@@ -310,13 +360,10 @@ class Client(QWidget):
                     self.users_list.addItem(f"• {user.strip()} (Online)")
             return
 
-        # MODIFICAÇÃO: Tratamento de expulsão ou banimento com diálogos em português
         if "Você foi expulso pelo Administrador!" in msg or "Você está banido" in msg:
-            QMessageBox.information(self, "Desconectado", msg)
             self.close()
             return
 
-        # MODIFICAÇÃO: Formatação de mensagens do sistema e eventos traduzidos
         if (
                 msg.startswith("Comando recusado")
                 or msg.startswith("[!]")
@@ -331,7 +378,6 @@ class Client(QWidget):
             self.chat_display.append(f"<span style='color: #ffffff;'>{msg}</span>")
 
     def handle_disconnected(self):
-        # MODIFICAÇÃO: Tradução da notificação de desconexão e limpeza da lista online
         self.chat_display.append("<span style='color: #e74c3c;'><i>[!] Desconectado do servidor.</i></span>")
         self.users_list.clear()
         if self.receive_thread:
@@ -339,6 +385,18 @@ class Client(QWidget):
         self.connect_button.setEnabled(True)
         self.nick_input.setEnabled(True)
         self.pass_input.setEnabled(True)
+        self._show_initial_instruction()
+
+    def closeEvent(self, event):
+        if hasattr(self, 'monitor_thread') and self.monitor_thread:
+            self.monitor_thread.stop()
+        if self.receive_thread:
+            self.receive_thread.stop()
+        try:
+            self.client.close()
+        except:
+            pass
+        event.accept()
 
     def send_message(self):
         if self.connect_button.isEnabled():
@@ -359,7 +417,6 @@ class Client(QWidget):
             self.pass_input.setEnabled(True)
             return
 
-        # MODIFICAÇÃO: Mensagens de resposta a comandos tratadas em português
         if text.startswith('/'):
             if self.nickname.lower() == "admin":
                 if text.startswith('/kick'):
