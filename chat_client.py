@@ -1,24 +1,23 @@
 import socket
 import sys
-# [MODIFICAÇÃO]: Importados módulos 'time' e 'datetime' para monitoramento do servidor e marcação de tempo (timestamps) nas mensagens.
 import time
+import os
+import base64
+import shutil
 from datetime import datetime
 
-# [MODIFICAÇÃO]: Importados novos componentes gráficos (QComboBox, QListWidget, QListWidgetItem, QColor, Qt) para montar a lista de usuários e seletores de status.
 from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QTextEdit, QLineEdit,
+    QApplication, QWidget, QVBoxLayout, QTextEdit, QTextBrowser, QLineEdit,
     QPushButton, QLabel, QMessageBox, QHBoxLayout, QInputDialog,
-    QComboBox, QListWidget, QListWidgetItem
+    QComboBox, QListWidget, QListWidgetItem, QFileDialog
 )
-from PyQt5.QtCore import QThread, pyqtSignal, Qt
-from PyQt5.QtGui import QColor
+from PyQt5.QtCore import QThread, pyqtSignal, Qt, QUrl
+from PyQt5.QtGui import QColor, QDesktopServices
 
 HOST = '127.0.0.1'
 PORT = 10346
 
 
-# [NOVA CLASSE]: Thread dedicada a monitorar a saúde do servidor via TCP em segundo plano.
-# Se o servidor cair repentinamente, ela emite um sinal para fechar a aplicação graciosamente.
 class ServerMonitorThread(QThread):
     server_down = pyqtSignal()
 
@@ -63,7 +62,6 @@ class ReceiveThread(QThread):
     new_message = pyqtSignal(str)
     connection_closed = pyqtSignal()
 
-    # [MODIFICAÇÃO]: Adicionado o parâmetro 'initial_buffer' para receber sobras do handshake inicial de conexão.
     def __init__(self, client, initial_buffer=""):
         super().__init__()
         self.client = client
@@ -71,7 +69,6 @@ class ReceiveThread(QThread):
         self.buffer = initial_buffer
 
     def run(self):
-        # [MODIFICAÇÃO]: Processa qualquer mensagem que já tenha chegado durante o handshake no buffer inicial.
         while '\n' in self.buffer:
             msg, self.buffer = self.buffer.split('\n', 1)
             msg = msg.strip()
@@ -82,16 +79,16 @@ class ReceiveThread(QThread):
                     self.running = False
                     return
 
-        # [MODIFICAÇÃO]: Implementada leitura orientada a linhas com delimitador '\n' para evitar colisão/fragmentação de pacotes no socket.
         while self.running:
             try:
-                data = self.client.recv(1024)
+                data = self.client.recv(8192)
                 if not data:
                     if self.running:
                         self.connection_closed.emit()
                     break
 
                 self.buffer += data.decode('utf-8')
+                
                 while '\n' in self.buffer:
                     msg, self.buffer = self.buffer.split('\n', 1)
                     msg = msg.strip()
@@ -109,7 +106,7 @@ class ReceiveThread(QThread):
     def stop(self):
         self.running = False
         self.quit()
-        self.wait(1000) # [MODIFICAÇÃO]: Adicionado timeout de 1s para encerrar a thread com segurança sem travar a interface.
+        self.wait(1000)
 
 
 class Client(QWidget):
@@ -118,7 +115,6 @@ class Client(QWidget):
         self.setWindowTitle("PyChat Multi-Temas Client")
         self.resize(900, 600)
         
-        # [NOVO]: Aplica estilo Dark Theme moderno via CSS no PyQt.
         self._apply_styles()
 
         self.client = None
@@ -126,15 +122,12 @@ class Client(QWidget):
         self.nickname = None
         self._setup_ui()
         
-        # [NOVO]: Exibe mensagem estilizada de orientações na tela inicial.
         self._show_initial_instruction()
 
-        # [NOVO]: Inicializa a thread de monitoramento do servidor.
         self.monitor_thread = ServerMonitorThread(HOST, PORT)
         self.monitor_thread.server_down.connect(self.on_server_shutdown)
         self.monitor_thread.start()
 
-    # [NOVO MÉTODO]: Exibe um banner de ajuda na caixa de texto formatado com HTML.
     def _show_initial_instruction(self):
         instruction = (
             "<div style='color: #3498db; font-size: 13px; line-height: 1.6;'>"
@@ -147,7 +140,6 @@ class Client(QWidget):
         )
         self.chat_display.setHtml(instruction)
 
-    # [NOVO MÉTODO]: Define folha de estilos CSS para todos os componentes (Dark Theme).
     def _apply_styles(self):
         self.setStyleSheet("""
             QWidget {
@@ -170,7 +162,7 @@ class Client(QWidget):
             QLineEdit:focus {
                 border: 1px solid #5865f2;
             }
-            QTextEdit {
+            QTextBrowser {
                 background-color: #191a24;
                 border: 1px solid #27293a;
                 border-radius: 12px;
@@ -259,7 +251,6 @@ class Client(QWidget):
         self.connect_button.setFixedHeight(36)
         self.connect_button.clicked.connect(self.start_connection)
 
-        # [NOVO]: Adicionado seletor de status de usuário (Online, Ausente, Ocupado).
         status_label = QLabel("Status:")
         self.status_combo = QComboBox()
         self.status_combo.addItems(["Online", "Ausente", "Ocupado"])
@@ -283,10 +274,11 @@ class Client(QWidget):
 
         body_layout = QHBoxLayout()
 
-        self.chat_display = QTextEdit()
+        self.chat_display = QTextBrowser()
+        self.chat_display.setOpenLinks(False) 
         self.chat_display.setReadOnly(True)
+        self.chat_display.anchorClicked.connect(self.abrir_link_externo)
 
-        # [NOVO]: Adicionado painel lateral com QListWidget para exibir usuários conectados em tempo real.
         users_panel = QVBoxLayout()
         users_title = QLabel("ONLINE")
         users_title.setStyleSheet("font-weight: bold; color: #8e9297; font-size: 11px;")
@@ -304,11 +296,11 @@ class Client(QWidget):
 
         msg_input_layout = QHBoxLayout()
 
-        # [NOVO]: Botões adicionais de arquivo e áudio na interface.
         self.btn_file = QPushButton("📁 Arquivo")
         self.btn_file.setObjectName("btnFile")
         self.btn_file.setFixedWidth(85)
         self.btn_file.setFixedHeight(36)
+        self.btn_file.clicked.connect(self.handle_file_button)
 
         self.btn_record = QPushButton("🎤 Gravar áudio")
         self.btn_record.setObjectName("btnRecord")
@@ -341,10 +333,92 @@ class Client(QWidget):
         main_layout.addWidget(self.tip_label)
         self.setLayout(main_layout)
 
-    # [NOVO MÉTODO]: Método auxiliar para fazer a leitura socket buffer por linha durante a conexão inicial.
+    def abrir_link_externo(self, url):
+        QDesktopServices.openUrl(url)
+
+    def handle_file_button(self):
+        if not hasattr(self, 'client') or self.client is None or self.connect_button.isVisible():
+            QMessageBox.warning(self, "Aviso", "Você precisa estar conectado para enviar arquivos.")
+            return
+
+        reply = QMessageBox.question(
+            self, "Tipo de Envio",
+            "Deseja enviar um Arquivo/Imagem (Sim) ou uma Pasta inteira (Não)?\n\n(Pastas serão convertidas para .zip)",
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
+        )
+
+        if reply == QMessageBox.Cancel:
+            return
+
+        if reply == QMessageBox.Yes:
+            filepath, _ = QFileDialog.getOpenFileName(self, "Selecionar Arquivo ou Imagem", "", "Todos os Arquivos (*);;Imagens (*.png *.jpg *.jpeg *.gif)")
+            if filepath:
+                self._process_and_send_file(filepath)
+        elif reply == QMessageBox.No:
+            dirpath = QFileDialog.getExistingDirectory(self, "Selecionar Pasta")
+            if dirpath:
+                try:
+                    self.chat_display.append(f"<span style='color: #72767d; font-size: 11px;'>[{datetime.now().strftime('%H:%M')}]</span> <i>Compactando pasta para envio...</i>")
+                    QApplication.processEvents()
+                    zip_path = shutil.make_archive(dirpath, 'zip', dirpath)
+                    self._process_and_send_file(zip_path)
+                except Exception as e:
+                    QMessageBox.warning(self, "Erro", f"Falha ao compactar pasta: {e}")
+
+    def _process_and_send_file(self, filepath):
+        try:
+            filename = os.path.basename(filepath)
+            if os.path.getsize(filepath) > 50 * 1024 * 1024:
+                QMessageBox.warning(self, "Erro", "O arquivo/pasta excede o limite de 50MB estabelecido para o chat.")
+                return
+            
+            with open(filepath, "rb") as f:
+                data = f.read()
+            
+            b64_data = base64.b64encode(data).decode('utf-8')
+            msg = f"FILE|{self.nickname}|{filename}|{b64_data}\n"
+            
+            self.client.send(msg.encode('utf-8'))
+        except Exception as e:
+            QMessageBox.warning(self, "Erro", f"Falha ao ler e enviar o arquivo: {e}")
+
+    def display_file(self, sender, filename, b64data):
+        now = datetime.now().strftime("%H:%M")
+        timestamp_html = f"<span style='color: #72767d; font-size: 11px;'>[{now}]</span>"
+        
+        try:
+            b64data = b64data.strip()
+            b64data += "=" * ((4 - len(b64data) % 4) % 4)
+            
+            raw_data = base64.b64decode(b64data)
+            ext = filename.split('.')[-1].lower() if '.' in filename else ''
+            
+            if ext in ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp']:
+                html = (f"{timestamp_html} <b>{sender}</b> enviou uma imagem:<br>"
+                        f"<img src='data:image/{ext};base64,{b64data}' width='250'><br>")
+                self.chat_display.append(html)
+            else:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                downloads_dir = os.path.join(base_dir, "downloads")
+                
+                os.makedirs(downloads_dir, exist_ok=True)
+                filepath = os.path.join(downloads_dir, f"{int(time.time())}_{filename}")
+                
+                with open(filepath, "wb") as f:
+                    f.write(raw_data)
+                
+                abs_path = os.path.abspath(filepath).replace('\\', '/')
+                file_url = f"file:///{abs_path}"
+                
+                html = (f"{timestamp_html} <b>{sender}</b> enviou um arquivo/pasta: <b>{filename}</b><br>"
+                        f"📁 <a href='{file_url}' style='color: #2ecc71; font-size: 11px; text-decoration: underline;'>Clique aqui para abrir o arquivo</a>")
+                self.chat_display.append(html)
+        except Exception as e:
+            self.chat_display.append(f"{timestamp_html} <span style='color: #e74c3c;'>Erro ao processar arquivo recebido de {sender}: {e}</span>")
+
     def _recv_line(self, buf):
         while '\n' not in buf:
-            data = self.client.recv(1024)
+            data = self.client.recv(8192)
             if not data:
                 break
             buf += data.decode('utf-8')
@@ -353,7 +427,6 @@ class Client(QWidget):
             return line.strip(), buf
         return buf.strip(), ""
 
-    # [NOVO MÉTODO]: Notifica o servidor sobre mudanças de status (Online, Ausente, Ocupado).
     def on_status_changed(self, new_status):
         if hasattr(self, 'client') and self.client:
             try:
@@ -374,13 +447,11 @@ class Client(QWidget):
             return
 
         self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # [MODIFICAÇÃO]: Define timeout na conexão para não congelar a interface gráfica caso o servidor esteja indisponível.
         self.client.settimeout(3.0)
         buf = ""
 
         try:
             self.client.connect((HOST, PORT))
-            # [MODIFICAÇÃO]: Atualizado fluxo de handshake adicionando quebras de linha '\n' aos pacotes transmitidos.
             line, buf = self._recv_line(buf)
             if line == "NICK":
                 self.client.send(f"{nick}\n".encode('utf-8'))
@@ -416,7 +487,6 @@ class Client(QWidget):
                 return
 
             self.nickname = nick.capitalize()
-            # [MODIFICAÇÃO]: Limpa o timeout para permitir a leitura contínua na thread separada.
             self.client.settimeout(None)
         except Exception as e:
             self.chat_display.append(f"<span style='color: #e74c3c;'><i>[!] Erro de conexão: {e}</i></span>")
@@ -427,7 +497,6 @@ class Client(QWidget):
         else:
             self.tip_label.hide()
 
-        # [MODIFICAÇÃO]: Oculta a barra de login e exibe o crachá do usuário logado na tela.
         self.lbl_user.setText(
             f"<span style='color: #7289da; font-size: 13px; font-weight: normal;'>Usuário:</span> "
             f"<span style='color: #5865f2; font-size: 16px; font-weight: bold;'>{self.nickname}</span>"
@@ -436,7 +505,6 @@ class Client(QWidget):
         self.pass_input.hide()
         self.connect_button.hide()
 
-        # [MODIFICAÇÃO]: Adicionado timestamp na mensagem de boas-vindas.
         now = datetime.now().strftime("%H:%M")
         self.chat_display.clear()
         self.chat_display.append(
@@ -451,7 +519,6 @@ class Client(QWidget):
 
         self.on_status_changed(self.status_combo.currentText())
 
-    # [NOVO MÉTODO]: Handler para fechar a janela se o monitor detectar queda do servidor.
     def on_server_shutdown(self):
         self.close()
 
@@ -463,7 +530,13 @@ class Client(QWidget):
             self.close()
             return
 
-        # [NOVO]: Intercepta a lista de usuários 'USERS:' enviada pelo servidor e atualiza o QListWidget lateral.
+        if msg.startswith("FILE|"):
+            parts = msg.split('|', 3)
+            if len(parts) == 4:
+                _, sender, filename, b64data = parts
+                self.display_file(sender, filename, b64data)
+            return
+
         if msg.startswith("USERS:"):
             users_data = msg[6:].split(',')
             self.users_list.clear()
@@ -485,18 +558,17 @@ class Client(QWidget):
             self.close()
             return
 
-        # [MODIFICAÇÃO]: Adicionado timestamp em formato HH:MM e formatação de cores em HTML para cada mensagem recebida.
         now = datetime.now().strftime("%H:%M")
         timestamp_html = f"<span style='color: #72767d; font-size: 11px;'>[{now}]</span> "
 
         if (
-                msg.startswith("Comando recusado")
-                or msg.startswith("[!]")
-                or "entrou no chat" in msg
-                or "saiu do chat" in msg
-                or "foi expulso pelo Administrador!" in msg
-                or "foi banido" in msg
-                or "foi desbanido" in msg
+            msg.startswith("Comando recusado")
+            or msg.startswith("[!]")
+            or "entrou no chat" in msg
+            or "saiu do chat" in msg
+            or "foi expulso pelo Administrador!" in msg
+            or "foi banido" in msg
+            or "foi desbanido" in msg
         ):
             self.chat_display.append(f"{timestamp_html}<span style='color: #f1c40f;'>[SISTEMA]: {msg}</span>")
         else:
@@ -508,7 +580,6 @@ class Client(QWidget):
         if self.receive_thread:
             self.receive_thread.stop()
 
-        # [MODIFICAÇÃO]: Restaura os controles de conexão (inputs e botões) em caso de queda.
         self.lbl_user.setText("<span style='color: #7289da; font-size: 13px;'>Usuário:</span>")
         self.nick_input.show()
         self.pass_input.show()
@@ -520,7 +591,6 @@ class Client(QWidget):
         self.tip_label.hide()
         self._show_initial_instruction()
 
-    # [NOVO MÉTODO]: Intercepta o encerramento da janela para fechar threads e sockets de forma limpa.
     def closeEvent(self, event):
         if hasattr(self, 'client') and self.client:
             try:
@@ -555,7 +625,6 @@ class Client(QWidget):
             self.close()
             return
 
-        # [MODIFICAÇÃO]: Adicionado delimitador '\n' no final do envio de todas as mensagens e comandos via socket.
         if text.startswith('/'):
             if self.nickname.lower() == "admin":
                 if text.startswith('/kick'):

@@ -8,6 +8,10 @@ HOST = '127.0.0.1'
 PORT = 10346
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+# [CORREÇÃO ADICIONADA AQUI]: Força o Windows a liberar a porta imediatamente ao fechar
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
 server.bind((HOST, PORT))
 server.listen()
 # [MODIFICAÇÃO]: Adicionado timeout de 1 segundo no accept do servidor para permitir interrupção graciosa sem travar o loop principal.
@@ -114,45 +118,59 @@ def handle(client):
         return
 
     try:
+        # [MODIFICAÇÃO CRUCIAL]: Criado um buffer para acumular pacotes de dados grandes (imagens e arquivos).
+        buffer = ""
         while True:
-            msg = client.recv(1024)
-            if not msg:
+            # [MODIFICAÇÃO]: Aumentado o tamanho de recebimento para 8192 para maior eficiência em arquivos grandes.
+            data = client.recv(8192)
+            if not data:
                 break
-            message = msg.decode().strip()
+            
+            buffer += data.decode('utf-8')
 
-            if message.lower() == 'q':
-                break
-            # [NOVO]: Trata o comando de alteração de status enviado pelos clientes.
-            elif message.startswith("STATUS:"):
-                new_status = message[7:].strip()
-                if client in clients:
-                    idx = clients.index(client)
-                    statuses[idx] = new_status
-                    broadcast_user_list()
-            elif message.startswith("KICK"):
-                if nickname.lower() == "admin":
-                    name = message[5:].strip()
-                    kick_user(name)
+            # [MODIFICAÇÃO]: Só processa e envia a mensagem quando encontrar o delimitador '\n', garantindo integridade.
+            while '\n' in buffer:
+                msg, buffer = buffer.split('\n', 1)
+                message = msg.strip()
+                
+                if not message:
+                    continue
+
+                if message.lower() == 'q':
+                    # Levanta um erro genérico apenas para quebrar o loop e cair no 'finally' para desconectar.
+                    raise ConnectionAbortedError 
+                
+                # [NOVO]: Trata o comando de alteração de status enviado pelos clientes.
+                elif message.startswith("STATUS:"):
+                    new_status = message[7:].strip()
+                    if client in clients:
+                        idx = clients.index(client)
+                        statuses[idx] = new_status
+                        broadcast_user_list()
+                elif message.startswith("KICK"):
+                    if nickname.lower() == "admin":
+                        name = message[5:].strip()
+                        kick_user(name)
+                    else:
+                        client.send("Comando recusado!\n".encode("utf-8"))
+                elif message.startswith("BAN"):
+                    if nickname.lower() == "admin":
+                        name = message[4:].strip()
+                        kick_user(name)
+                        with open("bans.txt", "a") as f:
+                            f.write(name.lower() + "\n")
+                        broadcast(f"{name} foi banido do chat pelo Administrador!\n")
+                    else:
+                        client.send("Comando recusado!\n".encode("utf-8"))
+                elif message.startswith("UNBAN"):
+                    if nickname.lower() == "admin":
+                        name = message[6:].strip()
+                        unban_user(name)
+                    else:
+                        client.send("Comando recusado!\n".encode("utf-8"))
                 else:
-                    client.send("Comando recusado!\n".encode("utf-8"))
-            elif message.startswith("BAN"):
-                if nickname.lower() == "admin":
-                    name = message[4:].strip()
-                    kick_user(name)
-                    with open("bans.txt", "a") as f:
-                        f.write(name.lower() + "\n")
-                    broadcast(f"{name} foi banido do chat pelo Administrador!\n")
-                else:
-                    client.send("Comando recusado!\n".encode("utf-8"))
-            elif message.startswith("UNBAN"):
-                if nickname.lower() == "admin":
-                    name = message[6:].strip()
-                    unban_user(name)
-                else:
-                    client.send("Comando recusado!\n".encode("utf-8"))
-            else:
-                # [MODIFICAÇÃO]: Garante que toda mensagem retransmitida termine em '\n'.
-                broadcast(f"{message}\n")
+                    # [MODIFICAÇÃO]: Garante que toda mensagem retransmitida termine em '\n'.
+                    broadcast(f"{message}\n")
     except:
         pass
     finally:
