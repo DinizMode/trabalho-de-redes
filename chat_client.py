@@ -190,13 +190,6 @@ class Client(QWidget):
             QPushButton#btnSend:hover {
                 background-color: #4752c4;
             }
-            QPushButton#btnRecord {
-                background-color: #f35543;
-                color: white;
-            }
-            QPushButton#btnRecord:hover {
-                background-color: #d94332;
-            }
             QPushButton#btnFile {
                 background-color: #262838;
                 color: white;
@@ -256,11 +249,6 @@ class Client(QWidget):
         self.status_combo.addItems(["Online", "Ausente", "Ocupado"])
         self.status_combo.currentTextChanged.connect(self.on_status_changed)
 
-        btn_options = QPushButton("Opções")
-        btn_options.setFlat(True)
-        btn_folder = QPushButton("Pasta")
-        btn_folder.setFlat(True)
-
         header_layout.addWidget(self.lbl_user)
         header_layout.addWidget(self.nick_input)
         header_layout.addWidget(self.pass_input)
@@ -269,8 +257,7 @@ class Client(QWidget):
         header_layout.addWidget(status_label)
         header_layout.addWidget(self.status_combo)
         header_layout.addSpacing(40)
-        header_layout.addWidget(btn_options)
-        header_layout.addWidget(btn_folder)
+    
 
         body_layout = QHBoxLayout()
 
@@ -302,10 +289,6 @@ class Client(QWidget):
         self.btn_file.setFixedHeight(36)
         self.btn_file.clicked.connect(self.handle_file_button)
 
-        self.btn_record = QPushButton("🎤 Gravar áudio")
-        self.btn_record.setObjectName("btnRecord")
-        self.btn_record.setFixedWidth(115)
-        self.btn_record.setFixedHeight(36)
 
         self.msg_input = QLineEdit()
         self.msg_input.setPlaceholderText("Digite sua mensagem (ou 'q' para sair)...")
@@ -319,7 +302,6 @@ class Client(QWidget):
         self.send_button.clicked.connect(self.send_message)
 
         msg_input_layout.addWidget(self.btn_file)
-        msg_input_layout.addWidget(self.btn_record)
         msg_input_layout.addWidget(self.msg_input, stretch=1)
         msg_input_layout.addWidget(self.send_button)
 
@@ -346,7 +328,7 @@ class Client(QWidget):
             "Deseja enviar um Arquivo/Imagem (Sim) ou uma Pasta inteira (Não)?\n\n(Pastas serão convertidas para .zip)",
             QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
         )
-
+    
         if reply == QMessageBox.Cancel:
             return
 
